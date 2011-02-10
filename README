@@ -1,0 +1,23 @@
+EZ_MySqli extends php's mysqli api to provide ease of use and simplicity to some of the original
+extentions features.
+The BIGGEST increase in ease of use is with prepared/parametarized queries.
+Prepared queries separate the query from the data, which makes sql-injection a thing of the
+past.  Any time you are sending user-submitted data of any kind (get, post, form data, etc...),
+prepared queries are the secure way to do it.
+
+Any function which takes a 'replacements' variable will replace question marks in the query or
+where clause with the contents of 'replacements' automatically. ('replacements' can always be
+either array or object)  If you do not wish for a query to be prepared, DO NOT SET THE 
+'replacements' variable, and a normal query will be used instead.
+
+The "insert()" and "update()" functions form prepared queries automatically, and this CANNOT be
+overridden!
+It should be noted, however, that the 'update()' function can take replacements for the WHERE
+clause as well as using prepared queries on the data being updated.
+ 
+If you need to do a prepared query the normal way, instead of using this libraries convience
+methods, you are in luck, as NONE OF THE default methods (besides the query() method) have been
+overriden!...so you can still run prepare() the normal way, and manually bind the parameters and
+all that jazz.
+
+License is creative commons, but give me (Eric Lien) credit please.
