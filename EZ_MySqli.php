@@ -21,7 +21,6 @@
 * methods, you are in luck, as NONE OF THE default methods (besides the query() method) have been
 * overriden!...so you can still run prepare() the normal way, and manually bind the parameters and
 * all that jazz.
-* License is creative commons, but give me (Eric Lien) credit please.
 */
 
 
@@ -120,14 +119,14 @@ class EZ_MySqli extends mysqli{
 	    $this->free_result();
 	    unset($this->last_result, $this->statementmgr);
 	    $this->last_result =& $this->prepare($query) or die("The attemped query failed because: ".$this->error."<br />Query: $query");
-	    $this->statementmgr =& new StatementMGR($this->last_result, $replacements);
+	    $this->statementmgr = new StatementMGR($this->last_result, $replacements);
 	  }else{ //if it is the same, we only have to bind the params and execute again
 	    $this->statementmgr->run_stmt($replacements);
 	  }
 	  $this->last_query = $query;
 	  $this->last_affected_rows = $this->statementmgr->affected_rows();
  	  $this->last_insert_id = $this->statementmgr->insert_id();
- 	  return $this->statementmgr;
+	  return $this->statementmgr;
 	}
 	
 	/**
@@ -151,6 +150,7 @@ class EZ_MySqli extends mysqli{
 	        //find first instance of $k in the $query
 	        $k_idx = strpos($query, $k);
 	        if($k_idx === false) break; //break if $k is no longer found
+	        if(is_null($v) or $v == '') $v = 'NULL';
 	        $params[$k_idx] = $v; //save $v to an array, indexed in order of where $k is found
 	        $query = preg_replace('/'.preg_quote($k,'/').'/', '@', $query, 1); //replace 1 occurance of $k in $query with a @
 	      }
@@ -163,6 +163,7 @@ class EZ_MySqli extends mysqli{
 	    }else{
 	      //find first instance of $k in the $query
 	      $q_idx = strpos($query, '?');
+	      if(is_null($v) or $v == '') $v = 'NULL';
 	      $params[$q_idx] = $v; //save $v to an array, indexed in order of where ? is found
 	      $query = preg_replace('/'.preg_quote('?','/').'/', '@', $query, 1); //replace 1 occurance of ? in $query with a @
 	    }
@@ -230,10 +231,10 @@ class EZ_MySqli extends mysqli{
 		}
 		if(!empty($fields) && !empty($values)){
 		  $q="INSERT INTO `$table` ($fields) VALUES ($values)";
-		  $result = $this->prepared_query($q, $params);		  
+		  $result = $this->prepared_query($q, $params);
 		}
 		if($result){
-		  $id = $this->insert_id();
+			$id = $this->insert_id();
 			unset($result);
 			$this->free_result();
 			if($id) return $id;
@@ -436,7 +437,70 @@ class EZ_MySqli extends mysqli{
 	function __destruct(){
 	  $this->reset();
 	  $this->close();	  
-	}    
+	}
+
+	############ Functions and aliases ONLY meant for backwards compatability ##################
+	//sets query to be run in the future
+	public function prep($query){
+		$this->sql = $query;		
+	}
+
+	//sets up a hook to be changed to the steralized value when the query registered with prep() is run with run()
+	//this is mainly useful for form input when you only want certain data steralized
+	// insert and update steralize all input automatically, but don't handle advanced querys.
+	public function bind($hook, $value){
+		$this->dbBind[$hook] = $this->steralize($value);
+	}
+	
+	//runs the preset query, replacing any hooks with values...
+	public function run(){
+		if(empty($this->sql)) return false;
+		if(is_array($this->dbBind)) //pretty much stupid check
+    	foreach($this->dbBind as $hook=>$value)
+      	$this->sql = str_replace($hook, "'$value'", $this->sql); //replace hooks with fixed values
+    $this->query($this->sql); //do the query
+    $this->dbBind = array();  //clear bind vars
+    $this->sql = "";
+    return $this->affected();
+	}
+	
+	//returns # of rows affected by last query
+	public function affected(){
+	  return $this->affected_rows();
+  }
+
+	//returns last auto incremented value
+	public function lastIDX(){
+		return $this->insert_id();
+	}
+	
+	public function ezquery($query){
+	  return $this->query();
+	}
+	
+	//converts a php date (unix timestamp) into mysql datetime format
+  //will return the current time if nothing is imput
+  function toMySqlDateTime($phpdate=null){
+	  if($phpdate) $phpdate = time();
+	  return date( 'Y-m-d H:i:s', $phpdate );
+  }
+
+  //converts a mysql date string to php datetime object
+  function toUnixTimestamp($mysqldate){
+	  return strtotime($mysqldate);
+  }
+
+  //converts html stored in the db using htmlentities into proper text for a web page
+  //set $textarea to 1 if you are outputting to an html <textarea> element 
+  function unhtml($html, $textarea=0){
+	  //convert <br> tags to new lines if it's an textarea
+	  if(!$textarea) $html = nl2br($html);
+	  //decode html into text for the browser
+	  $html = html_entity_decode($html);
+	  return $html;
+  }
+
+    
 }
 
 
@@ -485,21 +549,25 @@ class StatementMGR{
   
   /**
   * Binds parameters to the prepared statement
-  * (I know this seems terrible, but I tried and can't find a better way to do this...)
   */
   function bind_params(){
     array_unshift($this->params, $this->getPreparedTypeString($this->params));
-    //I'd be really really happy if anyone could explain why this works, but 
-    //commenting out the while loop and just using $arr doesn't
-    $arr =& $this->params;
-    $count = 0;
-    while($this->params[$count]){
-      $params[$count] = &$arr[$count]; 
-      $count++;
-    }    
-    call_user_func_array(array($this->stmt, 'bind_param'), $params);
-	}
-	
+    call_user_func_array(array($this->stmt, 'bind_param'), $this->refValues($this->params));
+  }
+  
+  /**
+  * php5.3 needs values of bind_param passed by reference.  In 5.2, it says it needs to be,
+  * but in my experience, doesn't work when I do.  Very stupid.
+  */
+  function refValues($arr){
+    if (strnatcmp(phpversion(),'5.3') >= 0){//Reference is required for PHP 5.3+
+      $refs = array();
+      foreach($arr as $key => $value) $refs[$key] = &$arr[$key];
+      return $refs;
+    }
+    return $arr;
+  }
+
 	/**
 	* Gets the "type string" from an array or object containing data that will be bound
 	* inputs:
